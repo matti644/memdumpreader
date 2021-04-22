@@ -10,8 +10,8 @@ namespace memdumpread
     {
         public byte[] headerStart { get; set; }
         public byte[] headerEnd { get; set; }
-        public int[] startIndexes { get; set; }
-        public int[] endIndexes { get; set; }
+        public List<int> startIndexes { get; set; }
+        public List<int> endIndexes { get; set; }
 
         private int startArrIndex { get; set; }
         private int endArrIndex { get; set; }
@@ -20,25 +20,19 @@ namespace memdumpread
 
         public SearchInfo()
         {
-            startIndexes = new int[200000];
-            endIndexes = new int[200000];
-        }
-
-        public SearchInfo(int length)
-        {
-            startIndexes = new int[length];
-            endIndexes = new int[length];
+            startIndexes = new List<int>();
+            endIndexes = new List<int>();
         }
 
         public void AddStartIndex(int i)
         {
-            startIndexes[startArrIndex] = i;
+            startIndexes.Add(i);
             startArrIndex++;
         }
 
         public void AddEndIndex(int i)
         {
-            endIndexes[endArrIndex] = i;
+            endIndexes.Add(i);
             endArrIndex++;
         }
 

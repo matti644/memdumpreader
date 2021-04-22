@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -45,6 +46,8 @@ namespace memdumpread
 
                 int breakIndex = filedata.Length;
 
+                Dictionary<int, int> written = new Dictionary<int, int>();
+
                 Parallel.For(0, arrlenght, (i, state) =>
                 {
                     if (state.ShouldExitCurrentIteration)
@@ -71,52 +74,52 @@ namespace memdumpread
                 Console.WriteLine("starting writing to disk from file: " + file.Name);
                 for (int x = 0; x < imageTypes.Length; x++)
                 {
+                    imageTypes[x].startIndexes.Sort();
                     Console.WriteLine("writing " + imageTypes[x].extension);
-                    Parallel.For(0, imageTypes[x].startIndexes.Length, (i, statei) =>
+                    bool shouldBreak = false;
+                    for (int i = 0; i < imageTypes[x].startIndexes.Count; i++)
                     {
-                        if (statei.ShouldExitCurrentIteration)
+                        if (i + 1 >= imageTypes[x].startIndexes.Count)
                         {
-                            if (statei.LowestBreakIteration < i)
-                                return;
+                            imageTypes[x].startIndexes.Add(arrlenght);
+                            shouldBreak = true;
                         }
-                        if (imageTypes[x].startIndexes[i] == 0)
+                        Parallel.For(imageTypes[x].startIndexes[i], imageTypes[x].startIndexes[i + 1], (j, state) =>
                         {
-                            if (i != 0)
+                            if (state.ShouldExitCurrentIteration)
                             {
-                                statei.Break();
+                                if (state.LowestBreakIteration < j)
+                                    return;
                             }
-                        }
-                        if (i == imageTypes[x].startIndexes.Length)
-                        {
-                            statei.Break();
-                        }
-                        else
-                        {
-                            Parallel.For(imageTypes[x].startIndexes[i], imageTypes[x].startIndexes[i + 1], (j, statej) =>
-                              {
-                                  if (statej.ShouldExitCurrentIteration)
-                                  {
-                                      if (statej.LowestBreakIteration < j)
-                                          return;
-                                  }
-                                  if (filedata.Length >= j + 1)
-                                  {
-                                      //if (filedata[j] == imageTypes[x].headerEnd[0] && filedata[j + 1] == imageTypes[x].headerEnd[1])
-                                      //{
-                                      if (checkIndex(j, imageTypes[x].headerEnd, filedata))
-                                      {
-                                          statej.Break();
-                                          var endIndex = j + imageTypes[x].headerEnd.Length;
-                                          using (FileStream stream = new FileStream(filepath + "\\dmps\\out\\" + j + imageTypes[x].extension, FileMode.Create, FileAccess.Write, FileShare.Read))
-                                          {
-                                              stream.Write(filedata, imageTypes[x].startIndexes[i], endIndex - imageTypes[x].startIndexes[i]);
-                                          }
-                                      }
-                                  }
-                              });
-                        }
-                    });
+                            if (j >= imageTypes[x].startIndexes[i + 1])
+                            {
+                                state.Break();
+                            }
+                            if (filedata.Length >= j + imageTypes[x].headerEnd.Length)
+                            {
+                                if (checkIndex(j, imageTypes[x].headerEnd, filedata))
+                                {
+                                    state.Break();
+                                    var endIndex = j + imageTypes[x].headerEnd.Length;
+                                    if (!written.ContainsValue(imageTypes[x].startIndexes[i]))
+                                    {
+                                        try
+                                        {
+                                            written.Add(imageTypes[x].startIndexes[i], endIndex);
+                                        }
+                                        catch { }
+                                        using (FileStream stream = new FileStream(filepath + "\\dmps\\out\\" + imageTypes[x].extension + "\\" + x + j + imageTypes[x].extension, FileMode.Create, FileAccess.Write, FileShare.Read))
+                                        {
+                                            stream.Write(filedata, imageTypes[x].startIndexes[i], endIndex - imageTypes[x].startIndexes[i]);
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        if (shouldBreak) { break; }
+                    }
                 }
+                written.Clear();
             }
 
             stopWatch.Stop();

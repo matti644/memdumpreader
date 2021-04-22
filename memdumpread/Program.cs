@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -7,29 +8,42 @@ namespace memdumpread
 {
     internal class Program
     {
+        public static int arrlenght = 0;
+
         private static void Main(string[] args)
         {
-            //FFD8FFE000104A464946
-            byte[] jpgstart = StringToByteArray("FFD8FFE000104A464946");
-            byte[] jpgend = StringToByteArray("FFD9");
-
             string filepath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
             DirectoryInfo d = new DirectoryInfo(filepath + "\\dmps");
 
             var files = d.GetFiles("*.DMP");
 
+            SearchInfo[] imageTypes = new SearchInfo[2];
+            for (int i = 0; imageTypes.Length > i; i++)
+            {
+                imageTypes[i] = new SearchInfo();
+            }
+
+            //jpg
+            imageTypes[0].AddHeaderStart("FFD8FFE000104A464946");
+            imageTypes[0].AddHeaderEnd("FFD9");
+            imageTypes[0].extension = ".jpg";
+            //png
+            imageTypes[1].AddHeaderStart("89504E470D0A1A0A0000000D49484452");
+            imageTypes[1].AddHeaderEnd("49454E44AE426082");
+            imageTypes[1].extension = ".png";
+
+            int typeCount = imageTypes.Length;
+
+            Stopwatch stopWatch = new Stopwatch();
+            stopWatch.Start();
+
             foreach (var file in files)
             {
                 var filedata = File.ReadAllBytes(file.FullName);
 
-                int[] startIndexes = new int[200000];
-                int[] endIndexes = new int[200000];
+                arrlenght = filedata.Length;
 
-                int arrlenght = filedata.Length;
-
-                int startArrIndex = 0;
-
-                int breakIndex = filedata.Length - 10;
+                int breakIndex = filedata.Length;
 
                 Parallel.For(0, arrlenght, (i, state) =>
                 {
@@ -42,70 +56,97 @@ namespace memdumpread
                     {
                         state.Break();
                     }
-                    else if (filedata[i] == jpgstart[0] && filedata[i + 1] == jpgstart[1])
-                    {
-                        if (filedata[i + 2] == jpgstart[2] && filedata[i + 3] == jpgstart[3] &&
-                            filedata[i + 4] == jpgstart[4] && filedata[i + 5] == jpgstart[5] &&
-                            filedata[i + 6] == jpgstart[6] && filedata[i + 7] == jpgstart[7] &&
-                            filedata[i + 8] == jpgstart[8] && filedata[i + 9] == jpgstart[9])
-                        {
-                            startIndexes[startArrIndex] = i;
-                            startArrIndex++;
-                            Console.WriteLine("found");
-                        }
-                    }
-                });
-                Parallel.For(0, startIndexes.Length, (i, state) =>
-                {
-                    if (state.ShouldExitCurrentIteration)
-                    {
-                        if (state.LowestBreakIteration < i)
-                            return;
-                    }
-                    if (startIndexes[i] == 0)
-                    {
-                        if (i != 0)
-                        {
-                            state.Break();
-                        }
-                    }
-                    if (i == startIndexes.Length)
-                    {
-                        state.Break();
-                    }
                     else
                     {
-                        Parallel.For(startIndexes[i], startIndexes[i + 1], (j, state) =>
-                          {
-                              if (state.ShouldExitCurrentIteration)
-                              {
-                                  if (state.LowestBreakIteration < j)
-                                      return;
-                              }
-                              if (filedata.Length >= j + 1)
-                              {
-                                  if (filedata[j] == jpgend[0] && filedata[j + 1] == jpgend[1])
-                                  {
-                                      state.Break();
-                                      var endIndex = j + 2;
-                                      using (FileStream stream = new FileStream(filepath + "\\dmps\\out\\" + j + ".jpg", FileMode.Create, FileAccess.Write, FileShare.Read))
-                                      {
-                                          stream.Write(filedata, startIndexes[i], endIndex - startIndexes[i]);
-                                      }
-                                  }
-                              }
-                          });
+                        for (int x = 0; x < typeCount; x++)
+                        {
+                            if (checkIndex(i, imageTypes[x].headerStart, filedata))
+                            {
+                                imageTypes[x].AddStartIndex(i);
+                                Console.WriteLine("found");
+                            }
+                        }
                     }
                 });
+                Console.WriteLine("starting writing to disk from file: " + file.Name);
+                for (int x = 0; x < imageTypes.Length; x++)
+                {
+                    Console.WriteLine("writing " + imageTypes[x].extension);
+                    Parallel.For(0, imageTypes[x].startIndexes.Length, (i, statei) =>
+                    {
+                        if (statei.ShouldExitCurrentIteration)
+                        {
+                            if (statei.LowestBreakIteration < i)
+                                return;
+                        }
+                        if (imageTypes[x].startIndexes[i] == 0)
+                        {
+                            if (i != 0)
+                            {
+                                statei.Break();
+                            }
+                        }
+                        if (i == imageTypes[x].startIndexes.Length)
+                        {
+                            statei.Break();
+                        }
+                        else
+                        {
+                            Parallel.For(imageTypes[x].startIndexes[i], imageTypes[x].startIndexes[i + 1], (j, statej) =>
+                              {
+                                  if (statej.ShouldExitCurrentIteration)
+                                  {
+                                      if (statej.LowestBreakIteration < j)
+                                          return;
+                                  }
+                                  if (filedata.Length >= j + 1)
+                                  {
+                                      //if (filedata[j] == imageTypes[x].headerEnd[0] && filedata[j + 1] == imageTypes[x].headerEnd[1])
+                                      //{
+                                      if (checkIndex(j, imageTypes[x].headerEnd, filedata))
+                                      {
+                                          statej.Break();
+                                          var endIndex = j + imageTypes[x].headerEnd.Length;
+                                          using (FileStream stream = new FileStream(filepath + "\\dmps\\out\\" + j + imageTypes[x].extension, FileMode.Create, FileAccess.Write, FileShare.Read))
+                                          {
+                                              stream.Write(filedata, imageTypes[x].startIndexes[i], endIndex - imageTypes[x].startIndexes[i]);
+                                          }
+                                      }
+                                  }
+                              });
+                        }
+                    });
+                }
             }
+
+            stopWatch.Stop();
+            TimeSpan ts = stopWatch.Elapsed;
+
+            // Format and display the TimeSpan value.
+            string elapsedTime = String.Format("{0:00}:{1:00}:{2:00}.{3:00}",
+                ts.Hours, ts.Minutes, ts.Seconds,
+                ts.Milliseconds / 10);
+            Console.WriteLine("RunTime " + elapsedTime);
         }
 
-        public static byte[] StringToByteArray(string hex)
+        public static bool checkIndex(int i, byte[] fileHeader, byte[] filedata)
         {
-            return Enumerable.Range(0, hex.Length)
-                             .Where(x => x % 2 == 0)
-                             .Select(x => Convert.ToByte(hex.Substring(x, 2), 16))
-                             .ToArray();
+            int headerLength = fileHeader.Length;
+            if (i <= arrlenght - headerLength)
+            {
+                for (int x = 0; x < headerLength; x++)
+                {
+                    if (filedata[i + x] == fileHeader[x])
+                    {
+                        if (x + 1 == headerLength)
+                        {
+                            return true;
+                        }
+                    }
+                    else { return false; }
+                }
+            }
+            return false;
         }
     }
 }
